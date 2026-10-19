@@ -47,7 +47,7 @@ def test_maps_bandit_json_to_normalized_finding(tmp_path: Path) -> None:
             "line": 1,
             "message": "Consider possible security implications",
             "recommendation": "https://bandit.readthedocs.io/",
-            "evidence": "import pickle",
+            "evidence": "Bandit rule B403 flagged line 1; source excerpt omitted.",
         }
     ]
     args = run.call_args.args[0]

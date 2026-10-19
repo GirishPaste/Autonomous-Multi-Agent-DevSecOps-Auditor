@@ -73,7 +73,7 @@ def _normalize_finding(result: dict[str, Any], root: Path) -> dict[str, Any]:
         "recommendation": str(
             result.get("more_info", "Review this finding and follow Bandit's guidance.")
         ),
-        "evidence": str(result.get("code", "")).strip(),
+        "evidence": f"Bandit rule {result.get('test_id', 'unknown')} flagged line {result.get('line_number', 1)}; source excerpt omitted.",
     }
 
 
