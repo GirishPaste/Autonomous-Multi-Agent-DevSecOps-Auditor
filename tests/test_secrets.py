@@ -1,10 +1,3 @@
- feature/python-code-scanner
-from pathlib import Path
-import sys
-
-import pytest
-
-
 from __future__ import annotations
 
 import sys
@@ -13,16 +6,12 @@ from pathlib import Path
 import pytest
 
 # Make the src/ package importable while running pytest from the repo root.
- main
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from devsecops_auditor.scanners.secrets import scan_secrets  # noqa: E402
 
- feature/python-code-scanner
-def test_detects_and_redacts_fake_secret(tmp_path: Path) -> None:
 
 def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None:
- main
     fake_secret = "fake-test-secret-84d07b3c9a"
     (tmp_path / "settings.py").write_text(
         f'password = "{fake_secret}"\n', encoding="utf-8"
@@ -32,9 +21,6 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
 
     assert findings
     finding = findings[0]
- feature/python-code-scanner
-    assert finding["scanner"] == "secrets"
-
     assert set(finding) == {
         "scanner",
         "rule_id",
@@ -47,7 +33,6 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
     }
     assert finding["scanner"] == "secrets"
     assert finding["rule_id"].islower()
- main
     assert finding["severity"] == "high"
     assert finding["file"] == "settings.py"
     assert finding["line"] == 1
@@ -57,28 +42,11 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
 
 def test_returns_no_findings_for_clean_file(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text(
- feature/python-code-scanner
-        "def greet(name):\n    return f'Hello, {name}'\n",
-        encoding="utf-8",
-
         "def greet(name):\n    return f'Hello, {name}'\n", encoding="utf-8"
-main
     )
 
     assert scan_secrets(tmp_path) == []
 
-
-feature/python-code-scanner
-def test_raises_error_for_missing_folder(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        scan_secrets(tmp_path / "missing")
-
-
-def test_raises_error_when_target_is_a_file(tmp_path: Path) -> None:
-    target_file = tmp_path / "not-a-folder.txt"
-    target_file.write_text("test", encoding="utf-8")
-
-    with pytest.raises(NotADirectoryError):
 
 @pytest.mark.parametrize(
     "excluded_directory",
@@ -117,5 +85,4 @@ def test_raises_a_clear_error_when_target_is_a_file(tmp_path: Path) -> None:
     target_file.write_text("nothing to scan", encoding="utf-8")
 
     with pytest.raises(NotADirectoryError, match="Scan target is not a directory"):
- main
         scan_secrets(target_file)
