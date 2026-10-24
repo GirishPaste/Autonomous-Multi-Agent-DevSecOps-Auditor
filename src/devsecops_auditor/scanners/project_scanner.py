@@ -1,15 +1,16 @@
-﻿"""Run the project's security scanners together."""
+﻿
+"""Run the project's security scanners together."""
 
 from pathlib import Path
 from typing import Any
 
 from .bandit_scanner import scan_python
-from .pip_audit_scanner import scan_requirements
+from .pip_audit_scanner import scan_dependencies
 from .secrets import scan_secrets
 
 
 def scan_project(target_folder: str | Path) -> list[dict[str, Any]]:
-    """Run Bandit, secret detection, and pip-audit when applicable."""
+    """Run Bandit, secret detection, and dependency scanning."""
     root = Path(target_folder).expanduser().resolve()
 
     if not root.exists():
@@ -22,10 +23,6 @@ def scan_project(target_folder: str | Path) -> list[dict[str, Any]]:
 
     findings.extend(scan_python(root))
     findings.extend(scan_secrets(root))
-
-    requirements_file = root / "requirements.txt"
-
-    if requirements_file.is_file():
-        findings.extend(scan_requirements(requirements_file))
+    findings.extend(scan_dependencies(root))
 
     return findings
