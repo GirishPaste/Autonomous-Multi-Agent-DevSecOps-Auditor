@@ -1,8 +1,4 @@
- feature/python-code-scanner
-"""Read-only secret scanning with redacted findings."""
-
 """Read-only secret scanning with normalized, redacted findings."""
- main
 
 from __future__ import annotations
 
@@ -37,11 +33,7 @@ _EXCLUDED_DIRECTORIES = {
 
 
 def _raise_walk_error(error: OSError) -> None:
- feature/python-code-scanner
-    """Report when a folder cannot be scanned."""
-
     """Raise directory traversal errors so the caller knows the scan was incomplete."""
-main
     raise error
 
 
@@ -56,20 +48,14 @@ def _source_files(root: Path) -> list[Path]:
         onerror=_raise_walk_error,
     ):
         current_path = Path(current_directory)
-feature/python-code-scanner
 
-
-main
         directory_names[:] = sorted(
             name
             for name in directory_names
             if name not in _EXCLUDED_DIRECTORIES
             and not (current_path / name).is_symlink()
         )
- feature/python-code-scanner
 
-
- main
         files.extend(
             current_path / name
             for name in sorted(file_names)
@@ -80,11 +66,7 @@ main
 
 
 def _redact_line(line: str, secret_values: list[str]) -> str:
- feature/python-code-scanner
-    """Hide detected secret values, or hide the entire line if unsure."""
-
     """Remove detected secret values from evidence."""
- main
     redacted = line.rstrip("\r\n")
 
     for secret_value in sorted(set(secret_values), key=len, reverse=True):
@@ -96,20 +78,12 @@ def _redact_line(line: str, secret_values: list[str]) -> str:
 
 
 def _rule_id(rule_type: str) -> str:
- feature/python-code-scanner
-    """Convert detector labels into machine-friendly rule IDs."""
-
     """Convert detector names to simple machine-readable IDs."""
- main
     return re.sub(r"[^a-z0-9]+", "_", rule_type.lower()).strip("_")
 
 
 def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
- feature/python-code-scanner
-    """Scan a folder and return normalized findings with redacted evidence."""
-
     """Scan a folder without modifying it; return findings with redacted evidence."""
- main
     root = Path(target_folder).expanduser()
 
     if not root.exists():
@@ -140,20 +114,13 @@ def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
             if line_number < 1 or line_number > len(lines):
                 evidence = "[REDACTED]"
             else:
- feature/python-code-scanner
-                values = [
-
                 line = lines[line_number - 1]
                 secret_values = [
-main
                     secret.secret_value or ""
                     for secret in secrets
                     if secret.line_number == line_number
                 ]
- feature/python-code-scanner
-                evidence = _redact_line(lines[line_number - 1], values)
                 evidence = _redact_line(line, secret_values)
- main
 
             for secret in sorted(
                 (item for item in secrets if item.line_number == line_number),
