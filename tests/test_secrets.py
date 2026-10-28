@@ -21,7 +21,10 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
 
     assert findings
     finding = findings[0]
+ feature/python-code-scanner
 
+
+ main
     assert set(finding) == {
         "scanner",
         "rule_id",
@@ -43,13 +46,18 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
 
 def test_returns_no_findings_for_clean_file(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text(
+ feature/python-code-scanner
         "def greet(name):\n    return f'Hello, {name}'\n",
         encoding="utf-8",
+
+        "def greet(name):\n    return f'Hello, {name}'\n", encoding="utf-8"
+ main
     )
 
     assert scan_secrets(tmp_path) == []
 
 
+ feature/python-code-scanner
 def test_raises_error_for_missing_folder(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         scan_secrets(tmp_path / "missing")
@@ -63,6 +71,8 @@ def test_raises_error_when_target_is_a_file(tmp_path: Path) -> None:
         scan_secrets(target_file)
 
 
+
+ main
 @pytest.mark.parametrize(
     "excluded_directory",
     [
@@ -102,4 +112,8 @@ def test_raises_a_clear_error_when_target_is_a_file(tmp_path: Path) -> None:
     target_file.write_text("nothing to scan", encoding="utf-8")
 
     with pytest.raises(NotADirectoryError, match="Scan target is not a directory"):
+ feature/python-code-scanner
         scan_secrets(target_file)
+
+        scan_secrets(target_file)
+ main
