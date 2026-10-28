@@ -21,6 +21,7 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
 
     assert findings
     finding = findings[0]
+
     assert set(finding) == {
         "scanner",
         "rule_id",
@@ -42,10 +43,24 @@ def test_detects_fake_secret_and_redacts_it_from_finding(tmp_path: Path) -> None
 
 def test_returns_no_findings_for_clean_file(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text(
-        "def greet(name):\n    return f'Hello, {name}'\n", encoding="utf-8"
+        "def greet(name):\n    return f'Hello, {name}'\n",
+        encoding="utf-8",
     )
 
     assert scan_secrets(tmp_path) == []
+
+
+def test_raises_error_for_missing_folder(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        scan_secrets(tmp_path / "missing")
+
+
+def test_raises_error_when_target_is_a_file(tmp_path: Path) -> None:
+    target_file = tmp_path / "not-a-folder.txt"
+    target_file.write_text("test", encoding="utf-8")
+
+    with pytest.raises(NotADirectoryError):
+        scan_secrets(target_file)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +83,9 @@ def test_skips_excluded_directories(
     fake_secret = "fake-test-secret-51a9c7e8d2"
     excluded_file = tmp_path / excluded_directory / "settings.py"
     excluded_file.parent.mkdir()
-    excluded_file.write_text(f'password = "{fake_secret}"\n', encoding="utf-8")
+    excluded_file.write_text(
+        f'password = "{fake_secret}"\n', encoding="utf-8"
+    )
 
     assert scan_secrets(tmp_path) == []
 

@@ -1,4 +1,3 @@
-"""Read-only secret scanning with normalized, redacted findings."""
 
 from __future__ import annotations
 
