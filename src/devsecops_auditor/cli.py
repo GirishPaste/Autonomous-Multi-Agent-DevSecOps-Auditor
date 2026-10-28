@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .scanners.project_scanner import scan_project
+from .scanners.zip_scanner import scan_zip
 
 
 def write_reports(
@@ -45,9 +46,16 @@ def write_reports(
 
             for key, value in finding.items():
                 # Avoid accidentally publishing raw secret values.
-                if key.lower() in {"secret", "secret_value", "raw_secret"}:
+                if key.lower() in {
+                    "secret",
+                    "secret_value",
+                    "raw_secret",
+                }:
                     value = "[REDACTED]"
-                lines.append(f"- **{key.replace('_', ' ').title()}:** {value}")
+
+                lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value}"
+                )
 
             lines.append("")
 
@@ -61,28 +69,49 @@ def write_reports(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Scan a project and generate JSON and Markdown reports."
+        description=(
+            "Scan a project directory or ZIP archive and generate "
+            "JSON and Markdown reports."
+        )
     )
+
     parser.add_argument(
         "project",
-        help="Path to the project directory to scan",
+        help="Path to the project directory or ZIP archive to scan",
     )
+
+    parser.add_argument(
+        "--zip",
+        action="store_true",
+        help="Treat the project argument as a ZIP archive",
+    )
+
     parser.add_argument(
         "--output",
         default="reports",
         help="Directory for generated reports (default: reports)",
     )
+
     args = parser.parse_args()
 
     try:
-        findings = scan_project(args.project)
-        json_path, markdown_path = write_reports(findings, args.output)
+        if args.zip:
+            findings = scan_zip(args.project)
+        else:
+            findings = scan_project(args.project)
+
+        json_path, markdown_path = write_reports(
+            findings,
+            args.output,
+        )
+
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
     print(f"Scan complete. Findings: {len(findings)}")
     print(f"JSON report: {json_path}")
     print(f"Markdown report: {markdown_path}")
+
     return 0
 
 
