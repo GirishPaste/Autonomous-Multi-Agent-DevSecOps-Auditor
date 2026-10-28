@@ -1,7 +1,3 @@
- feature/python-code-scanner
-
-"""Read-only secret scanning with normalized, redacted findings."""
- main
 
 from __future__ import annotations
 
