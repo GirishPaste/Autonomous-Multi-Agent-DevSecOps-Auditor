@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171719">
+  <title>DevSecOps Auditor</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div>
+          <p class="eyebrow">SECURITY WORKSPACE</p>
+          <h1>DevSecOps Auditor</h1>
+        </div>
+      </div>
+
+      <div class="local-badge">
+        <span class="live-dot"></span>
+        LOCAL SCAN WORKSPACE
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel intake-panel" aria-labelledby="intakeTitle">
+        <div class="panel-heading">
+          <p class="eyebrow">START HERE</p>
+          <h2 id="intakeTitle">Choose a project</h2>
+          <p class="panel-note">Scan a ZIP file or enter a Git repository.</p>
+        </div>
+
+        <div class="source-card zip-card">
+          <div class="source-heading">
+            <span class="source-number">01</span>
+            <div>
+              <h3>Upload ZIP</h3>
+              <p>Choose a project archive.</p>
+            </div>
+          </div>
+
+          <label class="file-picker" for="zipInput">
+            <span class="file-picker-icon" aria-hidden="true">↑</span>
+            <span>Choose ZIP file</span>
+          </label>
+          <input id="zipInput" class="visually-hidden" type="file" accept=".zip">
+          <p id="zipFileName" class="file-name" aria-live="polite">No file selected</p>
+
+          <button id="scanZipButton" class="button button-primary" type="button">
+            Scan ZIP
+          </button>
+        </div>
+
+        <div class="source-divider"><span>OR</span></div>
+
+        <form id="repoForm" class="source-card repo-card">
+          <div class="source-heading">
+            <span class="source-number">02</span>
+            <div>
+              <h3>Git repository</h3>
+              <p>Enter a repository URL.</p>
+            </div>
+          </div>
+
+          <label for="repoUrl">Repository URL</label>
+          <input
+            id="repoUrl"
+            name="repoUrl"
+            type="url"
+            placeholder="https://github.com/owner/repository"
+            autocomplete="url"
+          >
+
+          <button class="button button-secondary" type="button">
+            Scan repository
+          </button>
+        </form>
+
+        <p class="privacy-note">
+          <span aria-hidden="true">◆</span>
+          Scans run in this local workspace.
+        </p>
+      </section>
+
+      <section class="panel workflow-panel" aria-labelledby="workflowTitle">
+        <div class="workflow-heading">
+          <div>
+            <p class="eyebrow">LIVE WORKFLOW</p>
+            <h2 id="workflowTitle">Scan pipeline</h2>
+          </div>
+          <span class="workflow-tag">3 CHECKS</span>
+        </div>
+
+        <div id="processStatus" class="process-status" role="status" aria-live="polite">
+          <div class="status-copy">
+            <span class="status-indicator" aria-hidden="true"></span>
+            <div>
+              <p class="status-label">CURRENT STATUS</p>
+              <p id="processStatusText" class="status-message">Waiting for a project</p>
+            </div>
+          </div>
+
+          <div
+            id="progressTrack"
+            class="progress-track"
+            role="progressbar"
+            aria-label="Scan progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="pipeline" aria-label="Security scan stages">
+          <article class="agent-card" data-agent="code" data-state="waiting">
+            <span class="agent-node" aria-hidden="true"></span>
+            <div class="agent-meta">
+              <span class="agent-number">01</span>
+              <span class="agent-status" data-agent-status="code">Waiting</span>
+            </div>
+            <h3>Code Risk</h3>
+            <p>Reviews Bandit findings and explains code risks.</p>
+          </article>
+
+          <article class="agent-card" data-agent="dependencies" data-state="waiting">
+            <span class="agent-node" aria-hidden="true"></span>
+            <div class="agent-meta">
+              <span class="agent-number">02</span>
+              <span class="agent-status" data-agent-status="dependencies">Waiting</span>
+            </div>
+            <h3>Dependency Scan</h3>
+            <p>Checks dependencies for known vulnerabilities.</p>
+          </article>
+
+          <article class="agent-card" data-agent="secrets" data-state="waiting">
+            <span class="agent-node" aria-hidden="true"></span>
+            <div class="agent-meta">
+              <span class="agent-number">03</span>
+              <span class="agent-status" data-agent-status="secrets">Waiting</span>
+            </div>
+            <h3>Secrets Scan</h3>
+            <p>Checks for exposed credentials and redacts evidence.</p>
+          </article>
+        </div>
+
+        <div class="activity-panel">
+          <div class="activity-heading">
+            <h3>Process updates</h3>
+            <span class="activity-live"><span class="live-dot"></span> LIVE</span>
+          </div>
+          <ol id="activityLog" class="activity-log" aria-live="polite">
+            <li>Choose a project to begin the security review.</li>
+          </ol>
+        </div>
+      </section>
+
+      <aside class="panel finish-panel" aria-labelledby="finishTitle">
+        <div class="panel-heading">
+          <p class="eyebrow">FINISH</p>
+          <h2 id="finishTitle">Your results</h2>
+          <p class="panel-note">Downloads become available when the scan finishes.</p>
+        </div>
+
+        <div class="result-preview">
+          <span class="result-icon" aria-hidden="true">↗</span>
+          <div>
+            <strong>Security report</strong>
+            <span>Findings and recommendations</span>
+          </div>
+        </div>
+
+        <button id="downloadReportButton" class="button button-download" type="button" disabled>
+          Download report
+        </button>
+
+        <div class="result-preview">
+          <span class="result-icon result-icon-alt" aria-hidden="true">⬇</span>
+          <div>
+            <strong>Project ZIP</strong>
+            <span>Download the scanned project</span>
+          </div>
+        </div>
+
+        <button id="downloadProjectButton" class="button button-download" type="button" disabled>
+          Download project ZIP
+        </button>
+
+        <p class="finish-footnote">No automatic code changes are applied.</p>
+      </aside>
+    </main>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
