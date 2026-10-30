@@ -60,7 +60,7 @@
             <span class="source-number">02</span>
             <div>
               <h3>Git repository</h3>
-              <p>Enter a repository URL.</p>
+              <p>Enter a GitHub repository URL.</p>
             </div>
           </div>
 
@@ -71,9 +71,28 @@
             type="url"
             placeholder="https://github.com/owner/repository"
             autocomplete="url"
+            required
           >
 
-          <button class="button button-secondary" type="button">
+          <details>
+            <summary>Private repository? Add a GitHub token</summary>
+            <label for="githubToken">GitHub token</label>
+            <input
+              id="githubToken"
+              name="githubToken"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Read-only token"
+            >
+            <small>Used for this scan only; it is not saved.</small>
+          </details>
+
+          <button
+            id="scanRepositoryButton"
+            class="button button-secondary"
+            type="submit"
+          >
             Scan repository
           </button>
         </form>

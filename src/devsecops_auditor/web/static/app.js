@@ -1,21 +1,34 @@
 "use strict";
 
+// Remove any form values that an earlier normal form submission put in the URL.
+if (window.location.search) {
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.hash}`
+  );
+}
+
 const zipInput = document.getElementById("zipInput");
 const zipFileName = document.getElementById("zipFileName");
 const scanZipButton = document.getElementById("scanZipButton");
+const repositoryForm = document.getElementById("repoForm");
+const repositoryUrlInput = document.getElementById("repoUrl");
+const githubTokenInput = document.getElementById("githubToken");
+const repositoryButton = document.getElementById("scanRepositoryButton");
 const processStatusText = document.getElementById("processStatusText");
 const progressTrack = document.getElementById("progressTrack");
 const progressFill = document.getElementById("progressFill");
 const activityLog = document.getElementById("activityLog");
 const downloadReportButton = document.getElementById("downloadReportButton");
 const downloadProjectButton = document.getElementById("downloadProjectButton");
-const repositoryButton = document.querySelector(".repo-card .button-secondary");
 
 const agentNames = ["code", "dependencies", "secrets"];
 
 let selectedZip = null;
 let latestFindings = [];
 let scanInProgress = false;
+let activeSource = null;
 
 scanZipButton.disabled = true;
 
@@ -114,7 +127,10 @@ function handleScanEvent(payload) {
       });
     }
 
-    updateProgress(payload.message, Number(progressTrack.getAttribute("aria-valuenow")));
+    updateProgress(
+      payload.message,
+      Number(progressTrack.getAttribute("aria-valuenow"))
+    );
     addActivity(payload.message);
     return;
   }
@@ -126,7 +142,8 @@ function handleScanEvent(payload) {
     addActivity(payload.message);
 
     downloadReportButton.disabled = false;
-    downloadProjectButton.disabled = !selectedZip;
+    downloadProjectButton.disabled =
+      activeSource !== "zip" || !selectedZip;
   }
 }
 
@@ -192,21 +209,48 @@ async function readProgressStream(response) {
   }
 }
 
+async function getResponseError(response) {
+  try {
+    const payload = await response.json();
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+  } catch {
+    // Use a general message if the response body is not JSON.
+  }
+
+  return `The server returned an error (${response.status}).`;
+}
+
+function beginScan(source, message) {
+  scanInProgress = true;
+  activeSource = source;
+  latestFindings = [];
+
+  scanZipButton.disabled = true;
+  repositoryButton.disabled = true;
+  downloadReportButton.disabled = true;
+  downloadProjectButton.disabled = true;
+
+  resetAgentCards();
+  activityLog.replaceChildren();
+
+  updateProgress(message, 0);
+  addActivity("Starting a new scan.");
+}
+
+function finishScan() {
+  scanInProgress = false;
+  scanZipButton.disabled = !selectedZip;
+  repositoryButton.disabled = false;
+}
+
 async function startZipScan() {
   if (!selectedZip || scanInProgress) {
     return;
   }
 
-  scanInProgress = true;
-  latestFindings = [];
-  downloadReportButton.disabled = true;
-  downloadProjectButton.disabled = true;
-  scanZipButton.disabled = true;
-  resetAgentCards();
-  activityLog.replaceChildren();
-
-  updateProgress("Uploading project ZIP...", 0);
-  addActivity("Starting a new scan.");
+  beginScan("zip", "Uploading project ZIP...");
 
   try {
     const response = await fetch("/api/scan", {
@@ -218,26 +262,88 @@ async function startZipScan() {
     });
 
     if (!response.ok) {
-      throw new Error(`The server returned an error (${response.status}).`);
+      throw new Error(await getResponseError(response));
     }
 
     await readProgressStream(response);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "The scan could not be completed.";
+      error instanceof Error
+        ? error.message
+        : "The scan could not be completed.";
 
-    updateProgress(`Scan stopped: ${message}`, progressTrack.getAttribute("aria-valuenow"));
+    updateProgress(
+      `Scan stopped: ${message}`,
+      progressTrack.getAttribute("aria-valuenow")
+    );
     addActivity(`Scan stopped: ${message}`);
   } finally {
-    scanInProgress = false;
-    scanZipButton.disabled = !selectedZip;
+    finishScan();
+  }
+}
+
+async function startRepositoryScan(event) {
+  event.preventDefault();
+
+  if (scanInProgress || !repositoryForm.reportValidity()) {
+    return;
+  }
+
+  const repositoryUrl = repositoryUrlInput.value.trim();
+  let githubToken = githubTokenInput.value;
+  githubTokenInput.value = "";
+
+  let requestBody = JSON.stringify({
+    repository_url: repositoryUrl,
+    github_token: githubToken || null,
+  });
+  githubToken = "";
+
+  beginScan("repository", "Connecting to GitHub...");
+
+  try {
+    const pendingResponse = fetch("/api/scan/repository", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: requestBody,
+    });
+
+    requestBody = "";
+
+    const response = await pendingResponse;
+
+    if (!response.ok) {
+      throw new Error(await getResponseError(response));
+    }
+
+    await readProgressStream(response);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "The repository scan could not be completed.";
+
+    updateProgress(
+      `Scan stopped: ${message}`,
+      progressTrack.getAttribute("aria-valuenow")
+    );
+    addActivity(`Scan stopped: ${message}`);
+  } finally {
+    githubToken = "";
+    requestBody = "";
+    githubTokenInput.value = "";
+    githubTokenInput.closest("details")?.removeAttribute("open");
+    finishScan();
   }
 }
 
 zipInput.addEventListener("change", () => {
-  selectedZip = zipInput.files && zipInput.files.length > 0
-    ? zipInput.files[0]
-    : null;
+  selectedZip =
+    zipInput.files && zipInput.files.length > 0
+      ? zipInput.files[0]
+      : null;
 
   if (selectedZip && !selectedZip.name.toLowerCase().endsWith(".zip")) {
     selectedZip = null;
@@ -255,18 +361,10 @@ zipInput.addEventListener("change", () => {
 });
 
 scanZipButton.addEventListener("click", startZipScan);
-
-repositoryButton.addEventListener("click", () => {
-  if (scanInProgress) {
-    return;
-  }
-
-  updateProgress("Repository URL scanning is not connected yet.", 0);
-  addActivity("For now, upload a ZIP file to run the live scan.");
-});
+repositoryForm.addEventListener("submit", startRepositoryScan);
 
 downloadReportButton.addEventListener("click", () => {
-  if (latestFindings.length === 0 && downloadReportButton.disabled) {
+  if (downloadReportButton.disabled) {
     return;
   }
 
@@ -285,7 +383,11 @@ downloadReportButton.addEventListener("click", () => {
 });
 
 downloadProjectButton.addEventListener("click", () => {
-  if (!selectedZip) {
+  if (
+    downloadProjectButton.disabled ||
+    activeSource !== "zip" ||
+    !selectedZip
+  ) {
     return;
   }
 
