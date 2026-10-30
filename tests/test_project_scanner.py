@@ -1,4 +1,5 @@
 
+
 from pathlib import Path
 
 import pytest
@@ -22,15 +23,18 @@ def test_scan_project_combines_all_scanner_findings(tmp_path, monkeypatch):
     ]
 
     monkeypatch.setattr(
-        project_scanner, "scan_python",
+        project_scanner,
+        "scan_python",
         lambda folder: bandit_findings,
     )
     monkeypatch.setattr(
-        project_scanner, "scan_secrets",
-        lambda folder: secret_findings,
+        project_scanner,
+        "scan_secrets_with_values",
+        lambda folder: (secret_findings, []),
     )
     monkeypatch.setattr(
-        project_scanner, "scan_requirements",
+        project_scanner,
+        "scan_requirements",
         lambda file: dependency_findings,
     )
 
@@ -47,21 +51,82 @@ def test_skips_dependency_scan_without_requirements(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        project_scanner, "scan_python", lambda folder: []
+        project_scanner,
+        "scan_python",
+        lambda folder: [],
     )
     monkeypatch.setattr(
-        project_scanner, "scan_secrets", lambda folder: []
+        project_scanner,
+        "scan_secrets_with_values",
+        lambda folder: ([], []),
     )
 
     def unexpected_dependency_scan(file):
         pytest.fail("Dependency scan should be skipped")
 
     monkeypatch.setattr(
-        project_scanner, "scan_requirements",
+        project_scanner,
+        "scan_requirements",
         unexpected_dependency_scan,
     )
 
     assert project_scanner.scan_project(tmp_path) == []
+
+
+def test_scan_project_redacts_secrets_from_all_findings(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "app.py").write_text(
+        "print('hello')\n", encoding="utf-8"
+    )
+
+    fake_secret = "FAKE_TEST_CREDENTIAL_987654"
+
+    bandit_findings = [
+        {
+            "scanner": "bandit",
+            "severity": "HIGH",
+            "message": f"Potential issue involving {fake_secret}",
+            "agent_analysis": {
+                "risk_explanation": (
+                    f"The exposed credential is {fake_secret}"
+                )
+            },
+        }
+    ]
+
+    secret_findings = [
+        {
+            "scanner": "secrets",
+            "severity": "HIGH",
+            "message": "Potential credential detected; secret value redacted.",
+        }
+    ]
+
+    monkeypatch.setattr(
+        project_scanner,
+        "scan_python",
+        lambda folder: bandit_findings,
+    )
+    monkeypatch.setattr(
+        project_scanner,
+        "scan_secrets_with_values",
+        lambda folder: (secret_findings, [fake_secret]),
+    )
+
+    findings = project_scanner.scan_project(tmp_path)
+
+    assert fake_secret not in repr(findings)
+    assert "[REDACTED]" in repr(findings)
+
+    assert len(findings) == 2
+    assert findings[0]["scanner"] == "bandit"
+    assert findings[0]["severity"] == "HIGH"
+    assert "[REDACTED]" in findings[0]["message"]
+    assert (
+        "[REDACTED]"
+        in findings[0]["agent_analysis"]["risk_explanation"]
+    )
 
 
 def test_missing_project_directory_raises_error(tmp_path):

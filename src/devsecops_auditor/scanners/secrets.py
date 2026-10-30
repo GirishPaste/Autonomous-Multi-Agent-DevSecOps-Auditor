@@ -68,10 +68,13 @@ def _redact_line(line: str, secret_values: list[str]) -> str:
     """Remove detected secret values from evidence."""
     redacted = line.rstrip("\r\n")
 
-    for secret_value in sorted(set(secret_values), key=len, reverse=True):
-        if not secret_value or secret_value not in redacted:
-            return "[REDACTED]"
-        redacted = redacted.replace(secret_value, "[REDACTED]")
+    for secret_value in sorted(
+        set(secret_values),
+        key=len,
+        reverse=True,
+    ):
+        if secret_value:
+            redacted = redacted.replace(secret_value, "[REDACTED]")
 
     return redacted
 
@@ -81,14 +84,24 @@ def _rule_id(rule_type: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", rule_type.lower()).strip("_")
 
 
-def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
-    """Scan a folder without modifying it; return findings with redacted evidence."""
+def scan_secrets_with_values(
+    target_folder: str | Path,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    Scan a folder and return redacted findings plus detected values.
+
+    Detected values are returned separately for internal redaction
+    of findings produced by other scanners.
+    """
     root = Path(target_folder).expanduser()
 
     if not root.exists():
         raise FileNotFoundError(f"Scan target does not exist: {root}")
+
     if not root.is_dir():
-        raise NotADirectoryError(f"Scan target is not a directory: {root}")
+        raise NotADirectoryError(
+            f"Scan target is not a directory: {root}"
+        )
 
     root = root.resolve()
     collection = SecretsCollection()
@@ -99,14 +112,32 @@ def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
 
     findings: list[dict[str, Any]] = []
 
+    detected_secret_values = sorted(
+        {
+            secret.secret_value
+            for secrets in collection.data.values()
+            for secret in secrets
+            if isinstance(secret.secret_value, str)
+            and secret.secret_value
+        },
+        key=len,
+        reverse=True,
+    )
+
     for filename, secrets in collection.data.items():
         path = Path(filename)
-        line_numbers = sorted({secret.line_number for secret in secrets})
+        line_numbers = sorted(
+            {secret.line_number for secret in secrets}
+        )
 
         if not line_numbers:
             continue
 
-        with path.open("r", encoding="utf-8", errors="replace") as source:
+        with path.open(
+            "r",
+            encoding="utf-8",
+            errors="replace",
+        ) as source:
             lines = source.readlines()
 
         for line_number in line_numbers:
@@ -114,15 +145,21 @@ def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
                 evidence = "[REDACTED]"
             else:
                 line = lines[line_number - 1]
+
                 secret_values = [
                     secret.secret_value or ""
                     for secret in secrets
                     if secret.line_number == line_number
                 ]
+
                 evidence = _redact_line(line, secret_values)
 
             for secret in sorted(
-                (item for item in secrets if item.line_number == line_number),
+                (
+                    item
+                    for item in secrets
+                    if item.line_number == line_number
+                ),
                 key=lambda item: item.type,
             ):
                 findings.append(
@@ -144,4 +181,14 @@ def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
                     }
                 )
 
+    return findings, detected_secret_values
+
+
+def scan_secrets(target_folder: str | Path) -> list[dict[str, Any]]:
+    """
+    Preserve the original public interface.
+
+    Existing callers still receive a list of findings.
+    """
+    findings, _ = scan_secrets_with_values(target_folder)
     return findings
