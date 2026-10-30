@@ -3,40 +3,56 @@
 
 import argparse
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from .scanners.project_scanner import scan_project
+from .scanners.redaction import redact_sensitive_data
 from .scanners.zip_scanner import scan_zip
 
 
 def write_reports(
     findings: list[dict[str, Any]],
     output_dir: str | Path,
+    *,
+    secret_values: Iterable[str] | None = None,
 ) -> tuple[Path, Path]:
-    """Write findings to JSON and Markdown reports."""
+    """Write sanitized findings to JSON and Markdown reports."""
+    # Sanitize findings before writing either report.
+    safe_findings = redact_sensitive_data(
+        findings,
+        secret_values,
+    )
+
     destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
 
     json_path = destination / "report.json"
     markdown_path = destination / "report.md"
 
+    # Write sanitized JSON report.
     json_path.write_text(
-        json.dumps(findings, indent=2, ensure_ascii=False) + "\n",
+        json.dumps(
+            safe_findings,
+            indent=2,
+            ensure_ascii=False,
+        ) + "\n",
         encoding="utf-8",
     )
 
+    # Generate sanitized Markdown report.
     lines = [
         "# DevSecOps Auditor Report",
         "",
-        f"**Total findings:** {len(findings)}",
+        f"**Total findings:** {len(safe_findings)}",
         "",
     ]
 
-    if not findings:
+    if not safe_findings:
         lines.append("No security findings were reported.")
     else:
-        for number, finding in enumerate(findings, start=1):
+        for number, finding in enumerate(safe_findings, start=1):
             lines.extend(
                 [
                     f"## Finding {number}",
@@ -45,14 +61,6 @@ def write_reports(
             )
 
             for key, value in finding.items():
-                # Avoid accidentally publishing raw secret values.
-                if key.lower() in {
-                    "secret",
-                    "secret_value",
-                    "raw_secret",
-                }:
-                    value = "[REDACTED]"
-
                 lines.append(
                     f"- **{key.replace('_', ' ').title()}:** {value}"
                 )

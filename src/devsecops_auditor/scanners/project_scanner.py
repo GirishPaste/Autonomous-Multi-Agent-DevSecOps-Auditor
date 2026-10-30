@@ -1,4 +1,5 @@
 ﻿
+
 """Run the project's security scanners together."""
 
 import tempfile
@@ -7,12 +8,13 @@ from typing import Any
 
 from .bandit_scanner import scan_python
 from .pip_audit_scanner import scan_requirements
+from .redaction import redact_sensitive_data
 from .safe_zip import safe_extract_zip
-from .secrets import scan_secrets
+from .secrets import scan_secrets_with_values
 
 
 def scan_project(target_folder: str | Path) -> list[dict[str, Any]]:
-    """Run Bandit, secret detection, and pip-audit when applicable."""
+    """Run scanners and redact detected credentials across all findings."""
     root = Path(target_folder).expanduser().resolve()
 
     if not root.exists():
@@ -24,14 +26,22 @@ def scan_project(target_folder: str | Path) -> list[dict[str, Any]]:
         )
 
     findings: list[dict[str, Any]] = []
-    findings.extend(scan_python(root))
-    findings.extend(scan_secrets(root))
 
+    # Run the source-code scanner.
+    findings.extend(scan_python(root))
+
+    # Detect secrets and retain their values internally for redaction.
+    secret_findings, detected_secret_values = scan_secrets_with_values(root)
+    findings.extend(secret_findings)
+
+    # Run dependency scanning when requirements.txt exists.
     requirements_file = root / "requirements.txt"
+
     if requirements_file.is_file():
         findings.extend(scan_requirements(requirements_file))
 
-    return findings
+    # Redact credentials across findings from every scanner.
+    return redact_sensitive_data(findings, detected_secret_values)
 
 
 def scan_zip_project(archive_path: str | Path) -> list[dict[str, Any]]:
