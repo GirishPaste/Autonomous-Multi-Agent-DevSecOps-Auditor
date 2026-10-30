@@ -1,3 +1,4 @@
+
 """Run Bandit against Python files and return normalized security findings."""
 
 from __future__ import annotations
@@ -29,6 +30,9 @@ _EXCLUDED_DIRECTORIES = {
     "outputs",
     "venv",
 }
+
+# Bandit rules that can include hardcoded password values in issue_text.
+_SENSITIVE_BANDIT_RULES = {"B105", "B106", "B107"}
 
 
 def _raise_walk_error(error: OSError) -> None:
@@ -63,17 +67,28 @@ def _normalize_finding(result: dict[str, Any], root: Path) -> dict[str, Any]:
     full_path = reported_path if reported_path.is_absolute() else root / reported_path
     relative_path = full_path.resolve().relative_to(root)
 
+    rule_id = str(result.get("test_id", ""))
+
+    # Do not expose hardcoded password values in finding messages.
+    if rule_id in _SENSITIVE_BANDIT_RULES:
+        message = "Potential hardcoded password or secret detected."
+    else:
+        message = str(result.get("issue_text", ""))
+
     return {
         "scanner": "bandit",
-        "rule_id": str(result.get("test_id", "")),
+        "rule_id": rule_id,
         "severity": str(result.get("issue_severity", "unknown")).lower(),
         "file": relative_path.as_posix(),
         "line": int(result.get("line_number", 1)),
-        "message": str(result.get("issue_text", "")),
+        "message": message,
         "recommendation": str(
             result.get("more_info", "Review this finding and follow Bandit's guidance.")
         ),
-        "evidence": f"Bandit rule {result.get('test_id', 'unknown')} flagged line {result.get('line_number', 1)}; source excerpt omitted.",
+        "evidence": (
+            f"Bandit rule {rule_id or 'unknown'} flagged line "
+            f"{result.get('line_number', 1)}; source excerpt omitted."
+        ),
     }
 
 
