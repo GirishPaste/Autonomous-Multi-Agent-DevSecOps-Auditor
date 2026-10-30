@@ -158,3 +158,43 @@ def test_reports_a_clear_error_when_target_is_a_file(tmp_path: Path) -> None:
     target.write_text("pass\n", encoding="utf-8")
     with pytest.raises(NotADirectoryError, match="Scan target is not a directory"):
         scan_python(target)
+
+@pytest.mark.parametrize("rule_id", ["B105", "B106", "B107"])
+def test_redacts_hardcoded_password_from_sensitive_bandit_messages(
+    tmp_path: Path, rule_id: str
+) -> None:
+    secret = "fake-regression-secret-73921"
+    (tmp_path / "app.py").write_text(
+        f'API_TOKEN = "{secret}"\n', encoding="utf-8"
+    )
+
+    report = {
+        "results": [
+            {
+                "filename": "app.py",
+                "test_id": rule_id,
+                "issue_severity": "Low",
+                "line_number": 1,
+                "issue_text": f"Possible hardcoded password: '{secret}'",
+                "more_info": "https://bandit.readthedocs.io/",
+            }
+        ]
+    }
+    completed = SimpleNamespace(
+        returncode=1, stdout=json.dumps(report), stderr=""
+    )
+
+    with patch(
+        "devsecops_auditor.scanners.bandit_scanner.subprocess.run",
+        return_value=completed,
+    ):
+        findings = scan_python(tmp_path)
+
+    assert len(findings) == 1
+    assert secret not in repr(findings)
+    assert findings[0]["rule_id"] == rule_id
+    assert findings[0]["message"] == (
+        "Potential hardcoded password or secret detected."
+    )
+    assert findings[0]["file"] == "app.py"
+    assert findings[0]["line"] == 1
