@@ -27,6 +27,7 @@ const agentNames = ["code", "dependencies", "secrets"];
 
 let selectedZip = null;
 let latestFindings = [];
+let latestHumanReport = null;
 let scanInProgress = false;
 let activeSource = null;
 
@@ -105,6 +106,66 @@ function downloadBlob(contents, filename, contentType) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
+function escapeMarkdown(value) {
+  return String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/[\\`*_{}\[\]()#+.!|>~-]/g, "\\$&");
+}
+
+function buildMarkdownReport() {
+  const report = latestHumanReport;
+  const reportFindings =
+    report && Array.isArray(report.findings) ? report.findings : [];
+
+  const lines = [
+    "# DevSecOps Auditor Security Report",
+    "",
+    `Generated: ${new Date().toISOString()}`,
+    `Explanation source: ${escapeMarkdown(report?.provider || "unavailable")}`,
+    "",
+    "## Summary",
+    "",
+    escapeMarkdown(
+      report?.summary ||
+        "The scan completed, but the server did not provide report explanations."
+    ),
+    "",
+    `Total scanner findings: ${latestFindings.length}`,
+    `Detailed findings in this report: ${reportFindings.length}`,
+    "",
+  ];
+
+  for (let index = 0; index < reportFindings.length; index += 1) {
+    const finding = reportFindings[index] || {};
+    const severity = String(finding.severity || "unknown").toUpperCase();
+    const ruleId = finding.rule_id || "unknown";
+    const lineNumber =
+      Number.isInteger(finding.line) && finding.line > 0
+        ? finding.line
+        : "Unknown";
+
+    lines.push(
+      `## Finding ${index + 1}: ${escapeMarkdown(severity)} — ${escapeMarkdown(ruleId)}`,
+      "",
+      `**File:** ${escapeMarkdown(finding.file || "Unknown file")}`,
+      `**Line:** ${lineNumber}`,
+      `**Problem:** ${escapeMarkdown(finding.problem || "Scanner finding reported.")}`,
+      `**Why this matters:** ${escapeMarkdown(finding.impact || "Review the finding in the context of your application.")}`,
+      `**Solution:** ${escapeMarkdown(finding.solution || "Review and fix the issue, then rerun the scan.")}`,
+      ""
+    );
+  }
+
+  if (latestFindings.length > reportFindings.length) {
+    lines.push(
+      "> Some scanner findings do not have detailed explanations in this report.",
+      ""
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function handleScanEvent(payload) {
   if (payload.type === "status") {
     updateProgress(payload.message, payload.progress);
@@ -137,6 +198,10 @@ function handleScanEvent(payload) {
 
   if (payload.type === "complete") {
     latestFindings = Array.isArray(payload.findings) ? payload.findings : [];
+    latestHumanReport =
+      payload.human_report && typeof payload.human_report === "object"
+        ? payload.human_report
+        : null;
 
     updateProgress(payload.message, 100);
     addActivity(payload.message);
@@ -226,6 +291,7 @@ function beginScan(source, message) {
   scanInProgress = true;
   activeSource = source;
   latestFindings = [];
+  latestHumanReport = null;
 
   scanZipButton.disabled = true;
   repositoryButton.disabled = true;
@@ -368,17 +434,10 @@ downloadReportButton.addEventListener("click", () => {
     return;
   }
 
-  const report = {
-    application: "DevSecOps Auditor",
-    generated_at: new Date().toISOString(),
-    finding_count: latestFindings.length,
-    findings: latestFindings,
-  };
-
   downloadBlob(
-    JSON.stringify(report, null, 2),
-    "devsecops-audit-report.json",
-    "application/json"
+    buildMarkdownReport(),
+    "devsecops-audit-report.md",
+    "text/markdown;charset=utf-8"
   );
 });
 

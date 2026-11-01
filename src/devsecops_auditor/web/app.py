@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..agents.ai_report_agent import build_human_report
 from ..agents.code_risk_agent import analyze_bandit_findings
 from ..agents.dependency_risk_agent import analyze_dependency_findings
 from ..agents.secrets_response_agent import analyze_secret_findings
@@ -203,10 +204,24 @@ async def _scan_project_event_stream(
 
         yield _sse_message(
             {
+                "type": "status",
+                "progress": 98,
+                "message": "Preparing the human-readable security report...",
+            }
+        )
+
+        human_report = await asyncio.to_thread(
+            build_human_report,
+            all_findings,
+        )
+
+        yield _sse_message(
+            {
                 "type": "complete",
                 "progress": 100,
                 "finding_count": len(all_findings),
                 "findings": all_findings,
+                "human_report": human_report,
                 "message": f"Scan complete: {len(all_findings)} total finding(s).",
             }
         )
