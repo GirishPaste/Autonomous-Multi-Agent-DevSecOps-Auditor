@@ -1,4 +1,5 @@
-from __future__ import annotations
+
+
 
 import json
 import subprocess
@@ -43,6 +44,7 @@ def scan_requirements(requirements_file: str | Path) -> list[dict[str, Any]]:
         raise RuntimeError(f"Could not read pip-audit results: {detail}") from error
 
     findings: list[dict[str, Any]] = []
+
     for dependency in report.get("dependencies", []):
         package = str(dependency.get("name", "unknown"))
         version = str(dependency.get("version", "unknown"))
@@ -50,6 +52,7 @@ def scan_requirements(requirements_file: str | Path) -> list[dict[str, Any]]:
         for vulnerability in dependency.get("vulns", []):
             vulnerability_id = str(vulnerability.get("id", "unknown"))
             fix_versions = vulnerability.get("fix_versions") or []
+
             recommendation = (
                 f"Upgrade to one of these versions: {', '.join(map(str, fix_versions))}."
                 if fix_versions
@@ -72,4 +75,19 @@ def scan_requirements(requirements_file: str | Path) -> list[dict[str, Any]]:
                 }
             )
 
-    return findings
+    # Remove duplicate findings for the same package, version, and vulnerability.
+    unique_findings: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for finding in findings:
+        key = (
+            finding["evidence"],
+            finding["rule_id"],
+            finding["scanner"],
+        )
+
+        if key not in seen:
+            seen.add(key)
+            unique_findings.append(finding)
+
+    return unique_findings
