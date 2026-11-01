@@ -1,4 +1,3 @@
-
 """FastAPI entry point and live scan stream for the web interface."""
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..agents.ai_report_agent import build_human_report
 from ..agents.code_risk_agent import analyze_bandit_findings
 from ..agents.dependency_risk_agent import analyze_dependency_findings
 from ..agents.secrets_response_agent import analyze_secret_findings
@@ -22,12 +22,19 @@ from ..scanners.bandit_scanner import scan_python
 from ..scanners.pip_audit_scanner import scan_requirements
 from ..scanners.redaction import redact_sensitive_data
 from ..scanners.safe_zip import safe_extract_zip
-from ..scanners.secrets import scan_secrets_with_values
+from ..scanners.secrets import scan_secrets, scan_secrets_with_values
+from .repository import (
+    InvalidRepositoryURL,
+    RepositoryCloneError,
+    clone_github_repository,
+    normalize_github_repository_url,
+)
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_REPOSITORY_REQUEST_BYTES = 16 * 1024
 
 app = FastAPI(
     title="DevSecOps Auditor",
@@ -61,42 +68,16 @@ def _sse_message(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def _scan_event_stream(
-    archive_path: Path,
+async def _scan_project_event_stream(
     project_root: Path,
 ) -> AsyncIterator[str]:
-    """Safely extract a saved ZIP and stream real scan-stage updates."""
-    current_stage = "ZIP safety validation"
-    current_agent: str | None = None
+    """Run scanners, redact findings, and stream stage updates."""
+    current_stage = "Code Risk"
+    current_agent: str | None = "code"
 
     try:
-        yield _sse_message(
-            {
-                "type": "status",
-                "progress": 4,
-                "message": "ZIP received. Checking its paths and size limits...",
-            }
-        )
-
-        await asyncio.to_thread(
-            safe_extract_zip,
-            archive_path,
-            project_root,
-        )
-
-        yield _sse_message(
-            {
-                "type": "status",
-                "progress": 12,
-                "message": "ZIP validated and safely extracted.",
-            }
-        )
-
         all_findings: list[dict[str, Any]] = []
         detected_secret_values: list[str] = []
-
-        current_stage = "Code Risk"
-        current_agent = "code"
 
         yield _sse_message(
             {
@@ -108,16 +89,11 @@ async def _scan_event_stream(
             }
         )
 
-        bandit_findings = await asyncio.to_thread(
-            scan_python,
-            project_root,
-        )
-
+        bandit_findings = await asyncio.to_thread(scan_python, project_root)
         code_findings = await asyncio.to_thread(
             analyze_bandit_findings,
             bandit_findings,
         )
-
         all_findings.extend(code_findings)
 
         yield _sse_message(
@@ -133,7 +109,6 @@ async def _scan_event_stream(
 
         current_stage = "Dependency Risk"
         current_agent = "dependencies"
-
         requirements_file = project_root / "requirements.txt"
 
         if requirements_file.is_file():
@@ -143,7 +118,9 @@ async def _scan_event_stream(
                     "stage": "dependencies",
                     "state": "running",
                     "progress": 48,
-                    "message": "Checking dependencies and reviewing their risks...",
+                    "message": (
+                        "Checking dependencies and reviewing their risks..."
+                    ),
                 }
             )
 
@@ -151,12 +128,10 @@ async def _scan_event_stream(
                 scan_requirements,
                 requirements_file,
             )
-
             dependency_findings = await asyncio.to_thread(
                 analyze_dependency_findings,
                 raw_dependency_findings,
             )
-
             all_findings.extend(dependency_findings)
 
             yield _sse_message(
@@ -206,12 +181,10 @@ async def _scan_event_stream(
             scan_secrets_with_values,
             project_root,
         )
-
         secret_findings = await asyncio.to_thread(
             analyze_secret_findings,
             raw_secret_findings,
         )
-
         all_findings.extend(secret_findings)
 
         yield _sse_message(
@@ -230,11 +203,27 @@ async def _scan_event_stream(
         current_stage = "Report preparation"
         current_agent = None
 
-        # Redact all scanner and agent findings before sending them
-        # to the browser through the completion event.
         safe_findings = await asyncio.to_thread(
             redact_sensitive_data,
             all_findings,
+            detected_secret_values,
+        )
+
+        yield _sse_message(
+            {
+                "type": "status",
+                "progress": 98,
+                "message": "Preparing the human-readable security report...",
+            }
+        )
+
+        human_report = await asyncio.to_thread(
+            build_human_report,
+            safe_findings,
+        )
+        safe_human_report = await asyncio.to_thread(
+            redact_sensitive_data,
+            human_report,
             detected_secret_values,
         )
 
@@ -244,6 +233,7 @@ async def _scan_event_stream(
                 "progress": 100,
                 "finding_count": len(safe_findings),
                 "findings": safe_findings,
+                "human_report": safe_human_report,
                 "message": (
                     f"Scan complete: {len(safe_findings)} total finding(s)."
                 ),
@@ -251,14 +241,12 @@ async def _scan_event_stream(
         )
 
     except Exception as error:
-        # Do not log exception messages or tracebacks because they
-        # could accidentally contain sensitive project information.
+        # Avoid logging exception text that could contain scanned data.
         logger.error(
             "Web scan failed during %s (%s)",
             current_stage,
             type(error).__name__,
         )
-
         yield _sse_message(
             {
                 "type": "error",
@@ -269,6 +257,63 @@ async def _scan_event_stream(
                 ),
             }
         )
+
+
+async def _scan_zip_event_stream(
+    archive_path: Path,
+    project_root: Path,
+) -> AsyncIterator[str]:
+    """Safely extract a ZIP and stream the project's scan updates."""
+    try:
+        yield _sse_message(
+            {
+                "type": "status",
+                "progress": 4,
+                "message": "ZIP received. Checking its paths and size limits...",
+            }
+        )
+
+        await asyncio.to_thread(
+            safe_extract_zip,
+            archive_path,
+            project_root,
+        )
+
+        yield _sse_message(
+            {
+                "type": "status",
+                "progress": 12,
+                "message": "ZIP validated and safely extracted.",
+            }
+        )
+
+        async for event in _scan_project_event_stream(project_root):
+            yield event
+
+    except Exception as error:
+        logger.error(
+            "Web ZIP scan failed during safety validation (%s)",
+            type(error).__name__,
+        )
+        yield _sse_message(
+            {
+                "type": "error",
+                "stage": None,
+                "message": (
+                    "The scan stopped during ZIP safety validation. "
+                    "Check the server terminal for details."
+                ),
+            }
+        )
+
+
+# Kept as an alias for the existing ZIP redaction test and callers.
+async def _scan_event_stream(
+    archive_path: Path,
+    project_root: Path,
+) -> AsyncIterator[str]:
+    async for event in _scan_zip_event_stream(archive_path, project_root):
+        yield event
 
 
 @app.post("/api/scan")
@@ -284,7 +329,6 @@ async def scan_uploaded_zip(request: Request) -> StreamingResponse:
         )
 
     content_length = request.headers.get("content-length")
-
     if content_length:
         try:
             declared_size = int(content_length)
@@ -303,11 +347,9 @@ async def scan_uploaded_zip(request: Request) -> StreamingResponse:
     upload_workspace = tempfile.TemporaryDirectory(
         prefix="devsecops-auditor-web-"
     )
-
     temporary_root = Path(upload_workspace.name)
     archive_path = temporary_root / "upload.zip"
     project_root = temporary_root / "project"
-
     uploaded_bytes = 0
 
     try:
@@ -317,7 +359,6 @@ async def scan_uploaded_zip(request: Request) -> StreamingResponse:
                     continue
 
                 uploaded_bytes += len(chunk)
-
                 if uploaded_bytes > MAX_UPLOAD_BYTES:
                     raise HTTPException(
                         status_code=413,
@@ -338,7 +379,7 @@ async def scan_uploaded_zip(request: Request) -> StreamingResponse:
 
     async def stream_and_cleanup() -> AsyncIterator[str]:
         try:
-            async for event in _scan_event_stream(
+            async for event in _scan_zip_event_stream(
                 archive_path,
                 project_root,
             ):
@@ -348,6 +389,147 @@ async def scan_uploaded_zip(request: Request) -> StreamingResponse:
 
     return StreamingResponse(
         stream_and_cleanup(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/scan/repository")
+async def scan_github_repository(request: Request) -> StreamingResponse:
+    """Clone a GitHub repository, then stream the project's scan updates."""
+    content_type = request.headers.get("content-type", "")
+    media_type = content_type.split(";", maxsplit=1)[0].strip().lower()
+
+    if media_type != "application/json":
+        raise HTTPException(
+            status_code=415,
+            detail="Send the repository URL as JSON.",
+        )
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid request size.",
+            ) from error
+
+        if declared_size > MAX_REPOSITORY_REQUEST_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="The repository request is too large.",
+            )
+
+    try:
+        payload = await request.json()
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail="The repository request is not valid JSON.",
+        ) from error
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="The repository request must be a JSON object.",
+        )
+
+    try:
+        repository_url = normalize_github_repository_url(
+            payload.get("repository_url")
+        )
+    except InvalidRepositoryURL as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+
+    github_token = payload.get("github_token")
+    if github_token is not None and not isinstance(github_token, str):
+        raise HTTPException(
+            status_code=400,
+            detail="The GitHub token must be text.",
+        )
+
+    if github_token is not None:
+        if len(github_token) > 4096 or any(
+            ord(character) < 32 for character in github_token
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="The GitHub token format is invalid.",
+            )
+
+        github_token = github_token.strip() or None
+
+    scan_workspace = tempfile.TemporaryDirectory(
+        prefix="devsecops-auditor-repository-"
+    )
+    temporary_root = Path(scan_workspace.name)
+    project_root = temporary_root / "repository"
+
+    async def clone_scan_and_cleanup() -> AsyncIterator[str]:
+        try:
+            yield _sse_message(
+                {
+                    "type": "status",
+                    "progress": 4,
+                    "message": "Connecting to GitHub and cloning the repository...",
+                }
+            )
+
+            await asyncio.to_thread(
+                clone_github_repository,
+                repository_url,
+                project_root,
+                github_token=github_token,
+            )
+
+            yield _sse_message(
+                {
+                    "type": "status",
+                    "progress": 12,
+                    "message": "Repository cloned. Starting security checks...",
+                }
+            )
+
+            async for event in _scan_project_event_stream(project_root):
+                yield event
+
+        except RepositoryCloneError as error:
+            logger.warning("GitHub repository clone failed: %s", error)
+            yield _sse_message(
+                {
+                    "type": "error",
+                    "stage": None,
+                    "message": str(error),
+                }
+            )
+        except Exception as error:
+            logger.error(
+                "Repository scan failed during GitHub clone (%s)",
+                type(error).__name__,
+            )
+            yield _sse_message(
+                {
+                    "type": "error",
+                    "stage": None,
+                    "message": (
+                        "The repository scan could not start. "
+                        "Check the server terminal for details."
+                    ),
+                }
+            )
+        finally:
+            scan_workspace.cleanup()
+
+    return StreamingResponse(
+        clone_scan_and_cleanup(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
